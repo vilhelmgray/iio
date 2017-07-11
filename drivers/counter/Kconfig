@@ -3,11 +3,18 @@
 #
 # When adding new entries keep the list in alphabetical order
 
-menu "Counters"
+menuconfig COUNTER
+	tristate "Counter support"
+	help
+	  Provides support for Counter devices. The Generic Counter API provides
+	  rudimentary support for counters and serves as building blocks to
+	  create more complex counter interfaces.
+
+if COUNTER
 
 config 104_QUAD_8
 	tristate "ACCES 104-QUAD-8 driver"
-	depends on PC104 && X86 && ISA_BUS_API
+	depends on PC104 && X86 && ISA_BUS_API && IIO
 	help
 	  Say yes here to build support for the ACCES 104-QUAD-8 quadrature
 	  encoder counter/interface device family (104-QUAD-8, 104-QUAD-4).
@@ -23,11 +30,12 @@ config 104_QUAD_8
 
 config STM32_LPTIMER_CNT
 	tristate "STM32 LP Timer encoder counter driver"
-	depends on MFD_STM32_LPTIMER || COMPILE_TEST
+	depends on (MFD_STM32_LPTIMER || COMPILE_TEST) && IIO
 	help
 	  Select this option to enable STM32 Low-Power Timer quadrature encoder
 	  and counter driver.
 
 	  To compile this driver as a module, choose M here: the
 	  module will be called stm32-lptimer-cnt.
-endmenu
+
+endif # COUNTER
