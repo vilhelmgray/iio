@@ -278,21 +278,31 @@ extern ssize_t counter_count_enum_available_read(struct counter_device *counter,
 }
 
 /**
+ * struct counter_device_attr_group - internal container for attribute group
+ * @attr_group:	Counter sysfs attributes group
+ * @attr_list:	list to keep track of created Counter sysfs attributes
+ * @num_attr:	number of Counter sysfs attributes
+ */
+struct counter_device_attr_group {
+	struct attribute_group	attr_group;
+	struct list_head	attr_list;
+	size_t			num_attr;
+};
+
+/**
  * struct counter_device_state - internal state container for a Counter device
  * @id:		unique ID used to identify the Counter
  * @dev:	internal device structure
- * @attr_list:	list to keep track of created Counter sysfs attributes
- * @attr_group:	Counter sysfs attributes group
- * @groups:	attribute groups (used internally as NULL-terminated group list)
- * @num_attr:	number of Counter sysfs attributes
+ * @groups_list	attribute groups list (groups for Signals, Counts, and ext)
+ * @num_groups	number of attribute groups containers
+ * @groups:	Counter sysfs attribute groups (used to populate @dev.groups)
  */
 struct counter_device_state {
-	int				id;
-	struct device			dev;
-	struct list_head		attr_list;
-	struct attribute_group		attr_group;
-	const struct attribute_group	*groups[2];
-	size_t				num_attr;
+	int					id;
+	struct device				dev;
+	struct counter_device_attr_group	*groups_list;
+	size_t					num_groups;
+	const struct attribute_group		**groups;
 };
 
 /**

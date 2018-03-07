@@ -292,6 +292,16 @@ functionality, configurations, and data relating to the Counts, Signals,
 and Synapses of the Counter device, as well as options and information
 for the Counter device itself.
 
+Each Signal has a directory created to house its relevant sysfs
+attributes, where Y is the unqiue ID of the respective Signal:
+
+    /sys/bus/counter/devices/counterX/signalY
+
+Similarly, each Count has a directory created to house its relevant
+sysfs attributes, where Y is the unqiue ID of the respective Count:
+
+    /sys/bus/counter/devices/counterX/countY
+
 For a more detailed breakdown of the available Generic Counter interface
 sysfs attributes, please refer to the
 Documentation/ABI/testing/sys-bus-counter file.

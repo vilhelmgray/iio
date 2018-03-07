@@ -1,4 +1,4 @@
-What:		/sys/bus/counter/devices/counterX/countY
+What:		/sys/bus/counter/devices/counterX/countY/count
 KernelVersion:	4.17
 Contact:	linux-iio@vger.kernel.org
 Description:
@@ -10,7 +10,7 @@ Description:
 		COUNT_POSITION_SIGNED:
 			Signed integer value representing position.
 
-What:		/sys/bus/counter/devices/counterX/countY_function
+What:		/sys/bus/counter/devices/counterX/countY/function
 KernelVersion:	4.17
 Contact:	linux-iio@vger.kernel.org
 Description:
@@ -46,14 +46,14 @@ Description:
 			updates	the respective count. Quadrature encoding
 			determines the direction.
 
-What:		/sys/bus/counter/devices/counterX/countY_function_available
+What:		/sys/bus/counter/devices/counterX/countY/function_available
 KernelVersion:	4.17
 Contact:	linux-iio@vger.kernel.org
 Description:
 		Discrete set of available count function modes for the
 		configuration of the respective Count Y are listed in this file.
 
-What:		/sys/bus/counter/devices/counterX/countY_name
+What:		/sys/bus/counter/devices/counterX/countY/name
 KernelVersion:	4.17
 Contact:	linux-iio@vger.kernel.org
 Description:
@@ -62,7 +62,7 @@ Description:
 		respective channel as it appears in the device datasheet
 		documentation text.
 
-What:		/sys/bus/counter/devices/counterX/countY_signalZ_action
+What:		/sys/bus/counter/devices/counterX/countY/signalZ_action
 KernelVersion:	4.17
 Contact:	linux-iio@vger.kernel.org
 Description:
@@ -85,7 +85,7 @@ Description:
 		Both Edges:
 			Any state transition.
 
-What:		/sys/bus/counter/devices/counterX/countY_signalZ_action_available
+What:		/sys/bus/counter/devices/counterX/countY/signalZ_action_available
 KernelVersion:	4.17
 Contact:	linux-iio@vger.kernel.org
 Description:
@@ -93,7 +93,7 @@ Description:
 		for the configuration of the respective Synapse associating
 		Signal Z to Count Y.
 
-What:		/sys/bus/counter/devices/counterX/counter_name
+What:		/sys/bus/counter/devices/counterX/name
 KernelVersion:	4.17
 Contact:	linux-iio@vger.kernel.org
 Description:
@@ -101,7 +101,7 @@ Description:
 		the Counter. This should match the name of the device as it
 		appears in its respective datasheet documentation text.
 
-What:		/sys/bus/counter/devices/counterX/signalY
+What:		/sys/bus/counter/devices/counterX/signalY/signal
 KernelVersion:	4.17
 Contact:	linux-iio@vger.kernel.org
 Description:
@@ -110,7 +110,7 @@ Description:
 		SIGNAL_LEVEL:
 			Respective input has two discrete states: Low and High.
 
-What:		/sys/bus/counter/devices/counterX/signalY_name
+What:		/sys/bus/counter/devices/counterX/signalY/name
 KernelVersion:	4.17
 Contact:	linux-iio@vger.kernel.org
 Description:
@@ -118,11 +118,3 @@ Description:
 		Signal Y. If possible, this should match the name of the
 		respective signal as it appears in the device datasheet
 		documentation text.
-
-What:		/sys/bus/counter/devices/counterX/countY_synapses
-KernelVersion:	4.17
-Contact:	linux-iio@vger.kernel.org
-Description:
-		List of Synapses associating Signals to Count Y. The columns
-		represent the following in the respective order: Signal ID,
-		Signal name, and current action mode.

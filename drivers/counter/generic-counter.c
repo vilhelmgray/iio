@@ -305,18 +305,20 @@ struct counter_device_attr {
 	void				*component;
 };
 
-static int counter_attribute_create(const char *const prefix,
+static int counter_attribute_create(
+	struct counter_device_attr_group *const group,
+	const char *const prefix,
 	const char *const name,
 	ssize_t (*show)(struct device *dev, struct device_attribute *attr,
 		char *buf),
 	ssize_t (*store)(struct device *dev, struct device_attribute *attr,
 		const char *buf, size_t len),
-	void *const component, struct counter_device_state *const device_state)
+	void *const component)
 {
 	struct counter_device_attr *counter_attr;
 	struct device_attribute *dev_attr;
 	int err;
-	struct list_head *const attr_list = &device_state->attr_list;
+	struct list_head *const attr_list = &group->attr_list;
 
 	/* Allocate a Counter device attribute */
 	counter_attr = kzalloc(sizeof(*counter_attr), GFP_KERNEL);
@@ -346,7 +348,7 @@ static int counter_attribute_create(const char *const prefix,
 
 	/* Keep track of the attribute for later cleanup */
 	list_add(&counter_attr->l, attr_list);
-	device_state->num_attr++;
+	group->num_attr++;
 
 	return 0;
 
@@ -420,9 +422,9 @@ static ssize_t counter_signal_ext_store(struct device *dev,
 	return ext->write(counter, signal, ext->priv, buf, len);
 }
 
-static int counter_signal_ext_register(const char *const prefix,
-	struct counter_signal *const signal,
-	struct counter_device_state *const device_state)
+static int counter_signal_ext_register(
+	struct counter_device_attr_group *const group,
+	struct counter_signal *const signal)
 {
 	const size_t num_ext = signal->num_ext;
 	size_t i;
@@ -446,10 +448,10 @@ static int counter_signal_ext_register(const char *const prefix,
 		signal_ext_comp->ext = ext;
 
 		/* Allocate a Counter device attribute */
-		err = counter_attribute_create(prefix, ext->name,
+		err = counter_attribute_create(group, "", ext->name,
 			(ext->read) ? counter_signal_ext_show : NULL,
 			(ext->write) ? counter_signal_ext_store : NULL,
-			signal_ext_comp, device_state);
+			signal_ext_comp);
 		if (err) {
 			kfree(signal_ext_comp);
 			return err;
@@ -459,14 +461,13 @@ static int counter_signal_ext_register(const char *const prefix,
 	return 0;
 }
 
-static int counter_signal_attributes_create(const char *const signal_attr_name,
+static int counter_signal_attributes_create(
+	struct counter_device_attr_group *const group,
 	const struct counter_device *const counter,
 	struct counter_signal *const signal)
 {
 	struct signal_comp_t *signal_comp;
-	struct counter_device_state *const device_state = counter->device_state;
 	int err;
-	const char *prefix;
 	struct name_comp_t *name_comp;
 
 	/* Allocate Signal attribute component */
@@ -476,53 +477,38 @@ static int counter_signal_attributes_create(const char *const signal_attr_name,
 	signal_comp->signal = signal;
 
 	/* Create main Signal attribute */
-	err = counter_attribute_create("", signal_attr_name,
+	err = counter_attribute_create(group, "", "signal",
 		(counter->signal_read) ? counter_signal_show : NULL, NULL,
-		signal_comp, device_state);
+		signal_comp);
 	if (err) {
 		kfree(signal_comp);
 		return err;
 	}
 
-	prefix = kasprintf(GFP_KERNEL, "%s_", signal_attr_name);
-	if (!prefix)
-		return -ENOMEM;
-
 	/* Create Signal name attribute */
 	if (signal->name) {
 		/* Allocate name attribute component */
 		name_comp = kmalloc(sizeof(*name_comp), GFP_KERNEL);
-		if (!name_comp) {
-			err = -ENOMEM;
-			goto err_free_prefix;
-		}
+		if (!name_comp)
+			return -ENOMEM;
 		name_comp->name = signal->name;
 
 		/* Allocate Signal name attribute */
-		err = counter_attribute_create(prefix, "name",
-			counter_device_attr_name_show, NULL, name_comp,
-			device_state);
+		err = counter_attribute_create(group, "", "name",
+			counter_device_attr_name_show, NULL, name_comp);
 		if (err) {
 			kfree(name_comp);
-			goto err_free_prefix;
+			return err;
 		}
 	}
 
 	/* Register Signal extension attributes */
-	err = counter_signal_ext_register(prefix, signal, device_state);
-	if (err)
-		goto err_free_prefix;
-
-	kfree(prefix);
-
-	return 0;
-
-err_free_prefix:
-	kfree(prefix);
-	return err;
+	return counter_signal_ext_register(group, signal);
 }
 
-static int counter_signals_register(const struct counter_device *const counter)
+static int counter_signals_register(
+	struct counter_device_attr_group *const groups_list,
+	const struct counter_device *const counter)
 {
 	const size_t num_signals = counter->num_signals;
 	struct counter_device_state *const device_state = counter->device_state;
@@ -542,24 +528,21 @@ static int counter_signals_register(const struct counter_device *const counter)
 	for (i = 0; i < num_signals; i++) {
 		signal = counter->signals + i;
 
-		/* Generate Signal attribute name */
+		/* Generate Signal attribute directory name */
 		name = kasprintf(GFP_KERNEL, "signal%d", signal->id);
 		if (!name)
 			return -ENOMEM;
 
-		/* Create all attributes associated with Signal */
-		err = counter_signal_attributes_create(name, counter, signal);
-		if (err)
-			goto err_free_name;
+		groups_list[i].attr_group.name = name;
 
-		kfree(name);
+		/* Create all attributes associated with Signal */
+		err = counter_signal_attributes_create(groups_list + i, counter,
+			signal);
+		if (err)
+			return err;
 	}
 
 	return 0;
-
-err_free_name:
-	kfree(name);
-	return err;
 }
 
 static const char *const synapse_action_str[] = {
@@ -653,12 +636,13 @@ static ssize_t counter_synapse_action_available_show(struct device *dev,
 	return len;
 }
 
-static int counter_synapses_register(const struct counter_device *const counter,
+static int counter_synapses_register(
+	struct counter_device_attr_group *const group,
+	const struct counter_device *const counter,
 	struct counter_count *const count, const char *const count_attr_name)
 {
-	struct counter_device_state *const device_state = counter->device_state;
 	const size_t num_synapses = count->num_synapses;
-	struct device *const dev = &device_state->dev;
+	struct device *const dev = &counter->device_state->dev;
 	size_t i;
 	struct counter_synapse *synapse;
 	const char *prefix;
@@ -693,7 +677,7 @@ static int counter_synapses_register(const struct counter_device *const counter,
 		}
 
 		/* Generate attribute prefix */
-		prefix = kasprintf(GFP_KERNEL, "%s_signal%d_", count_attr_name,
+		prefix = kasprintf(GFP_KERNEL, "signal%d_",
 			synapse->signal->id);
 		if (!prefix)
 			return -ENOMEM;
@@ -708,10 +692,10 @@ static int counter_synapses_register(const struct counter_device *const counter,
 		action_comp->count = count;
 
 		/* Create action attribute */
-		err = counter_attribute_create(prefix, "action",
+		err = counter_attribute_create(group, prefix, "action",
 			(counter->action_get) ? counter_action_show : NULL,
 			(counter->action_set) ? counter_action_store : NULL,
-			action_comp, device_state);
+			action_comp);
 		if (err) {
 			kfree(action_comp);
 			goto err_free_prefix;
@@ -727,9 +711,10 @@ static int counter_synapses_register(const struct counter_device *const counter,
 		avail_comp->num_actions = synapse->num_actions;
 
 		/* Create action_available attribute */
-		err = counter_attribute_create(prefix, "action_available",
+		err = counter_attribute_create(group, prefix,
+			"action_available",
 			counter_synapse_action_available_show, NULL,
-			avail_comp, device_state);
+			avail_comp);
 		if (err) {
 			kfree(avail_comp);
 			goto err_free_prefix;
@@ -844,31 +829,6 @@ static ssize_t counter_function_store(struct device *dev,
 	return len;
 }
 
-static ssize_t counter_count_synapses_show(struct device *dev,
-	struct device_attribute *attr, char *buf)
-{
-	size_t i;
-	const struct counter_device_attr *const devattr = to_counter_attr(attr);
-	const struct count_comp_t *const component = devattr->component;
-	struct counter_count *const count = component->count;
-	const struct counter_synapse *synapse;
-	enum synapse_action action;
-	ssize_t len = 0;
-
-	/* Print out a list of every Signal association to Count */
-	for (i = 0; i < count->num_synapses; i++) {
-		synapse = count->synapses + i;
-		action = synapse->actions_list[synapse->action];
-		len += snprintf(buf + len, PAGE_SIZE - len, "%d\t%s\t%s\n",
-			synapse->signal->id, synapse->signal->name,
-			synapse_action_str[action]);
-		if (len >= PAGE_SIZE)
-			return -ENOMEM;
-	}
-
-	return len;
-}
-
 struct count_ext_comp_t {
 	struct counter_count		*count;
 	const struct counter_count_ext	*ext;
@@ -898,9 +858,9 @@ static ssize_t counter_count_ext_store(struct device *dev,
 	return ext->write(counter, count, ext->priv, buf, len);
 }
 
-static int counter_count_ext_register(const char *const prefix,
-	struct counter_count *const count,
-	struct counter_device_state *const device_state)
+static int counter_count_ext_register(
+	struct counter_device_attr_group *const group,
+	struct counter_count *const count)
 {
 	const size_t num_ext = count->num_ext;
 	size_t i;
@@ -924,10 +884,10 @@ static int counter_count_ext_register(const char *const prefix,
 		count_ext_comp->ext = ext;
 
 		/* Allocate count_ext attribute */
-		err = counter_attribute_create(prefix, ext->name,
+		err = counter_attribute_create(group, "", ext->name,
 			(ext->read) ? counter_count_ext_show : NULL,
 			(ext->write) ? counter_count_ext_store : NULL,
-			count_ext_comp, device_state);
+			count_ext_comp);
 		if (err) {
 			kfree(count_ext_comp);
 			return err;
@@ -962,17 +922,15 @@ static ssize_t counter_count_function_available_show(struct device *dev,
 	return len;
 }
 
-static int counter_count_attributes_create(const char *const count_attr_name,
+static int counter_count_attributes_create(
+	struct counter_device_attr_group *const group,
 	const struct counter_device *const counter,
 	struct counter_count *const count)
 {
 	struct count_comp_t *count_comp;
-	struct counter_device_state *const device_state = counter->device_state;
 	int err;
-	const char *prefix;
 	struct count_comp_t *func_comp;
 	struct func_avail_comp_t *avail_comp;
-	struct count_comp_t *synapses_comp;
 	struct name_comp_t *name_comp;
 
 	/* Allocate count attribute component */
@@ -982,105 +940,69 @@ static int counter_count_attributes_create(const char *const count_attr_name,
 	count_comp->count = count;
 
 	/* Create main Count attribute */
-	err = counter_attribute_create("", count_attr_name,
+	err = counter_attribute_create(group, "", "count",
 		(counter->count_read) ? counter_count_show : NULL,
 		(counter->count_write) ? counter_count_store : NULL,
-		count_comp, device_state);
+		count_comp);
 	if (err) {
 		kfree(count_comp);
 		return err;
 	}
 
-	prefix = kasprintf(GFP_KERNEL, "%s_", count_attr_name);
-	if (!prefix)
-		return -ENOMEM;
-
 	/* Allocate function attribute component */
 	func_comp = kmalloc(sizeof(*func_comp), GFP_KERNEL);
-	if (!func_comp) {
-		err = -ENOMEM;
-		goto err_free_prefix;
-	}
+	if (!func_comp)
+		return -ENOMEM;
 	func_comp->count = count;
 
 	/* Create Count function attribute */
-	err = counter_attribute_create(prefix, "function",
+	err = counter_attribute_create(group, "", "function",
 		(counter->function_get) ? counter_function_show : NULL,
 		(counter->function_set) ? counter_function_store : NULL,
-		func_comp, device_state);
+		func_comp);
 	if (err) {
 		kfree(func_comp);
-		goto err_free_prefix;
+		return err;
 	}
 
 	/* Allocate function available attribute component */
 	avail_comp = kmalloc(sizeof(*avail_comp), GFP_KERNEL);
-	if (!avail_comp) {
-		err = -ENOMEM;
-		goto err_free_prefix;
-	}
+	if (!avail_comp)
+		return -ENOMEM;
 	avail_comp->functions_list = count->functions_list;
 	avail_comp->num_functions = count->num_functions;
 
 	/* Create Count function_available attribute */
-	err = counter_attribute_create(prefix, "function_available",
-		counter_count_function_available_show, NULL, avail_comp,
-		device_state);
+	err = counter_attribute_create(group, "", "function_available",
+		counter_count_function_available_show, NULL, avail_comp);
 	if (err) {
 		kfree(avail_comp);
-		goto err_free_prefix;
+		return err;
 	}
-
-	/* Allocate synapses attribute component */
-	synapses_comp = kmalloc(sizeof(*synapses_comp), GFP_KERNEL);
-	if (!synapses_comp) {
-		err = -ENOMEM;
-		goto err_free_prefix;
-	}
-	synapses_comp->count = count;
-
-	/* Create Count synapses attribute */
-	err = counter_attribute_create(prefix, "synapses",
-		counter_count_synapses_show, NULL, synapses_comp, device_state);
-	if (err) {
-		kfree(synapses_comp);
-		goto err_free_prefix;
-	}
-
-	/* Allocate name attribute component */
-	name_comp = kmalloc(sizeof(*name_comp), GFP_KERNEL);
-	if (!name_comp) {
-		err = -ENOMEM;
-		goto err_free_prefix;
-	}
-	name_comp->name = count->name;
 
 	/* Create Count name attribute */
 	if (count->name) {
-		err = counter_attribute_create(prefix, "name",
-			counter_device_attr_name_show,	NULL, name_comp,
-			device_state);
+		/* Allocate name attribute component */
+		name_comp = kmalloc(sizeof(*name_comp), GFP_KERNEL);
+		if (!name_comp)
+			return -ENOMEM;
+		name_comp->name = count->name;
+
+		err = counter_attribute_create(group, "", "name",
+			counter_device_attr_name_show,	NULL, name_comp);
 		if (err) {
 			kfree(name_comp);
-			goto err_free_prefix;
+			return err;
 		}
 	}
 
 	/* Register Count extension attributes */
-	err = counter_count_ext_register(prefix, count, device_state);
-	if (err)
-		goto err_free_prefix;
-
-	kfree(prefix);
-
-	return 0;
-
-err_free_prefix:
-	kfree(prefix);
-	return err;
+	return counter_count_ext_register(group, count);
 }
 
-static int counter_counts_register(const struct counter_device *const counter)
+static int counter_counts_register(
+	struct counter_device_attr_group *const groups_list,
+	const struct counter_device *const counter)
 {
 	const size_t num_counts = counter->num_counts;
 	struct device *const dev = &counter->device_state->dev;
@@ -1106,29 +1028,26 @@ static int counter_counts_register(const struct counter_device *const counter)
 			return -EINVAL;
 		}
 
-		/* Generate attribute name */
+		/* Generate Count attribute directory name */
 		name = kasprintf(GFP_KERNEL, "count%d", count->id);
 		if (!name)
 			return -ENOMEM;
+		groups_list[i].attr_group.name = name;
 
 		/* Register the Synapses associated with each Count */
-		err = counter_synapses_register(counter, count, name);
+		err = counter_synapses_register(groups_list + i, counter, count,
+			name);
 		if (err)
-			goto err_free_name;
+			return err;
 
 		/* Create all attributes associated with Count */
-		err = counter_count_attributes_create(name, counter, count);
+		err = counter_count_attributes_create(groups_list + i, counter,
+			count);
 		if (err)
-			goto err_free_name;
-
-		kfree(name);
+			return err;
 	}
 
 	return 0;
-
-err_free_name:
-	kfree(name);
-	return err;
 }
 
 static struct bus_type counter_bus_type = {
@@ -1145,7 +1064,7 @@ static void __exit counter_exit(void)
 	bus_unregister(&counter_bus_type);
 }
 
-static void free_counter_device_state_attr_list(struct list_head *attr_list)
+static void free_counter_device_attr_list(struct list_head *attr_list)
 {
 	struct counter_device_attr *p, *n;
 
@@ -1157,6 +1076,23 @@ static void free_counter_device_state_attr_list(struct list_head *attr_list)
 	}
 }
 
+static void free_counter_device_groups_list(
+	struct counter_device_state *const device_state)
+{
+	struct counter_device_attr_group *group;
+	size_t i;
+
+	for (i = 0; i < device_state->num_groups; i++) {
+		group = device_state->groups_list + i;
+
+		kfree(group->attr_group.name);
+		kfree(group->attr_group.attrs);
+		free_counter_device_attr_list(&group->attr_list);
+	}
+
+	kfree(device_state->groups_list);
+}
+
 /* Provides a unique ID for each counter device */
 static DEFINE_IDA(counter_ida);
 
@@ -1165,8 +1101,8 @@ static void counter_device_release(struct device *dev)
 	struct counter_device *const counter = dev_get_drvdata(dev);
 	struct counter_device_state *const device_state = counter->device_state;
 
-	kfree(device_state->attr_group.attrs);
-	free_counter_device_state_attr_list(&device_state->attr_list);
+	kfree(device_state->groups);
+	free_counter_device_groups_list(device_state);
 	ida_simple_remove(&counter_ida, device_state->id);
 	kfree(device_state);
 }
@@ -1202,7 +1138,9 @@ static ssize_t counter_device_ext_store(struct device *dev,
 	return ext->write(counter, ext->priv, buf, len);
 }
 
-static int counter_device_ext_register(struct counter_device *const counter)
+static int counter_device_ext_register(
+	struct counter_device_attr_group *const group,
+	struct counter_device *const counter)
 {
 	const size_t num_ext = counter->num_ext;
 	struct ext_comp_t *ext_comp;
@@ -1225,10 +1163,10 @@ static int counter_device_ext_register(struct counter_device *const counter)
 		ext_comp->ext = ext;
 
 		/* Allocate extension attribute */
-		err = counter_attribute_create("", ext->name,
+		err = counter_attribute_create(group, "", ext->name,
 			(ext->read) ? counter_device_ext_show : NULL,
 			(ext->write) ? counter_device_ext_store : NULL,
-			ext_comp, counter->device_state);
+			ext_comp);
 		if (err) {
 			kfree(ext_comp);
 			return err;
@@ -1237,16 +1175,6 @@ static int counter_device_ext_register(struct counter_device *const counter)
 
 	return 0;
 }
-
-static ssize_t counter_name_show(struct device *dev,
-	struct device_attribute *attr, char *buf)
-{
-	const struct counter_device *const counter = dev_get_drvdata(dev);
-
-	return snprintf(buf, PAGE_SIZE, "%s\n", counter->name);
-}
-
-static DEVICE_ATTR_RO(counter_name);
 
 /**
  * counter_register - register Counter to the system
@@ -1258,10 +1186,14 @@ static DEVICE_ATTR_RO(counter_name);
  */
 int counter_register(struct counter_device *const counter)
 {
-	int err;
 	struct counter_device_state *device_state;
-	struct counter_device_attr *p;
+	int err;
 	size_t i = 0;
+	size_t groups_offset = 0;
+	struct name_comp_t *name_comp;
+	struct counter_device_attr_group *group;
+	size_t j;
+	struct counter_device_attr *p;
 
 	if (!counter)
 		return -EINVAL;
@@ -1290,57 +1222,100 @@ int counter_register(struct counter_device *const counter)
 	device_initialize(&device_state->dev);
 	dev_set_drvdata(&device_state->dev, counter);
 
-	/* Initialize attribute list */
-	INIT_LIST_HEAD(&device_state->attr_list);
-
-	/* Verify Signals are valid and register */
-	err = counter_signals_register(counter);
-	if (err)
-		goto err_free_attributes;
-
-	/* Verify Counts and respective Synapses are valid and register */
-	err = counter_counts_register(counter);
-	if (err)
-		goto err_free_attributes;
-
-	/* Register Counter device extension attributes */
-	err = counter_device_ext_register(counter);
-	if (err)
-		goto err_free_attributes;
-
-	/* Account for name attribute */
-	if (counter->name)
-		device_state->num_attr++;
-
-	/* Allocate space for attribute pointers in attribute group */
-	device_state->attr_group.attrs = kcalloc(device_state->num_attr + 1,
-		sizeof(*device_state->attr_group.attrs), GFP_KERNEL);
-	if (!device_state->attr_group.attrs) {
+	/* Allocate space for attribute groups (signals. counts, and ext) */
+	device_state->num_groups =
+		counter->num_signals + counter->num_counts + 1;
+	device_state->groups_list = kcalloc(device_state->num_groups,
+		sizeof(*device_state->groups_list), GFP_KERNEL);
+	if (!device_state->groups_list) {
 		err = -ENOMEM;
-		goto err_free_attributes;
+		goto err_free_id;
 	}
 
-	/* Add attribute pointers to attribute group */
-	list_for_each_entry(p, &device_state->attr_list, l)
-		device_state->attr_group.attrs[i++] = &p->dev_attr.attr;
-	if (counter->name)
-		device_state->attr_group.attrs[i] = &dev_attr_counter_name.attr;
+	/* Initialize attribute lists */
+	for (i = 0; i < device_state->num_groups; i++)
+		INIT_LIST_HEAD(&device_state->groups_list[i].attr_list);
 
+	/* Verify Signals are valid and register */
+	err = counter_signals_register(device_state->groups_list, counter);
+	if (err)
+		goto err_free_groups_list;
+	groups_offset += counter->num_signals;
+
+	/* Verify Counts and respective Synapses are valid and register */
+	err = counter_counts_register(device_state->groups_list + groups_offset,
+		counter);
+	if (err)
+		goto err_free_groups_list;
+	groups_offset += counter->num_counts;
+
+	/* Register Counter device extension attributes */
+	err = counter_device_ext_register(
+		device_state->groups_list + groups_offset, counter);
+	if (err)
+		goto err_free_groups_list;
+
+	/* Account for name attribute */
+	if (counter->name) {
+		/* Allocate name attribute component */
+		name_comp = kmalloc(sizeof(*name_comp), GFP_KERNEL);
+		if (!name_comp) {
+			err = -ENOMEM;
+			goto err_free_groups_list;
+		}
+		name_comp->name = counter->name;
+
+		err = counter_attribute_create(
+			device_state->groups_list + groups_offset, "", "name",
+			counter_device_attr_name_show,	NULL, name_comp);
+		if (err) {
+			kfree(name_comp);
+			goto err_free_groups_list;
+		}
+	}
+
+	/* Allocate attribute groups for association with device */
+	device_state->groups = kcalloc(device_state->num_groups + 1,
+		sizeof(*device_state->groups), GFP_KERNEL);
+	if (!device_state->groups) {
+		err = -ENOMEM;
+		goto err_free_groups_list;
+	}
+	/* Prepare each group of attributes for association */
+	for (i = 0; i < device_state->num_groups; i++) {
+		group = device_state->groups_list + i;
+
+		/* Allocate space for attribute pointers in attribute group */
+		group->attr_group.attrs = kcalloc(group->num_attr + 1,
+			sizeof(*group->attr_group.attrs), GFP_KERNEL);
+		if (!group->attr_group.attrs) {
+			err = -ENOMEM;
+			goto err_free_groups;
+		}
+
+		/* Add attribute pointers to attribute group */
+		j = 0;
+		list_for_each_entry(p, &group->attr_list, l)
+			group->attr_group.attrs[j++] = &p->dev_attr.attr;
+
+		/* Group attributes in attribute group */
+		device_state->groups[i] = &group->attr_group;
+	}
 	/* Associate attributes with device */
-	device_state->groups[0] = &device_state->attr_group;
 	device_state->dev.groups = device_state->groups;
 
 	/* Add device to system */
 	err = device_add(&device_state->dev);
 	if (err)
-		goto err_free_attr_group_attrs;
+		goto err_free_groups;
 
 	return 0;
 
-err_free_attr_group_attrs:
-	kfree(counter->device_state->attr_group.attrs);
-err_free_attributes:
-	free_counter_device_state_attr_list(&counter->device_state->attr_list);
+err_free_groups:
+	kfree(counter->device_state->groups);
+err_free_groups_list:
+	free_counter_device_groups_list(counter->device_state);
+err_free_id:
 	ida_simple_remove(&counter_ida, counter->device_state->id);
 err_free_device_state:
 	kfree(counter->device_state);
