@@ -127,7 +127,7 @@ static int stm32_count_function_set(struct counter_device *counter,
 	return 0;
 }
 
-static int stm32_count_direction_read(struct counter_device *counter,
+static ssize_t stm32_count_direction_read(struct counter_device *counter,
 				      struct counter_count *count,
 				      void *private, char *buf)
 {
