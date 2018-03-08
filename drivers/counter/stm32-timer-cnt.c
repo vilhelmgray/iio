@@ -279,12 +279,12 @@ static struct counter_signal stm32_signals[] = {
 
 static struct counter_synapse stm32_count_synapses[] = {
 	{
-		.actions = stm32_synapse_actions,
+		.actions_list = stm32_synapse_actions,
 		.num_actions = ARRAY_SIZE(stm32_synapse_actions),
 		.signal = &stm32_signals[0]
 	},
 	{
-		.actions = stm32_synapse_actions,
+		.actions_list = stm32_synapse_actions,
 		.num_actions = ARRAY_SIZE(stm32_synapse_actions),
 		.signal = &stm32_signals[1]
 	}
@@ -293,7 +293,7 @@ static struct counter_synapse stm32_count_synapses[] = {
 static struct counter_count stm32_counts = {
 	.id = 0,
 	.name = "Channel 1 Count",
-	.functions = stm32_count_functions,
+	.functions_list = stm32_count_functions,
 	.num_functions = ARRAY_SIZE(stm32_count_functions),
 	.synapses = stm32_count_synapses,
 	.num_synapses = ARRAY_SIZE(stm32_count_synapses),
